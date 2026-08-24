@@ -1,0 +1,35 @@
+-- Replace the placeholders, then run this once in the Supabase SQL editor.
+-- The Edge Functions use verify_jwt=false and independently verify x-cron-secret.
+
+select vault.create_secret('https://YOUR_PROJECT_REF.supabase.co', 'project_url');
+select vault.create_secret('YOUR_LONG_RANDOM_CRON_SECRET', 'inboxscout_cron_secret');
+
+select cron.schedule(
+  'inboxscout-send-campaigns',
+  '*/2 * * * *',
+  $$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'project_url') || '/functions/v1/send-campaign-emails',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'inboxscout_cron_secret')
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);
+
+select cron.schedule(
+  'inboxscout-sync-replies',
+  '*/15 * * * *',
+  $$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'project_url') || '/functions/v1/sync-gmail-replies',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'inboxscout_cron_secret')
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);

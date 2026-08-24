@@ -1,0 +1,8 @@
+project_id = "inboxscout"
+
+[functions.send-campaign-emails]
+verify_jwt = false
+
+[functions.sync-gmail-replies]
+verify_jwt = false
+

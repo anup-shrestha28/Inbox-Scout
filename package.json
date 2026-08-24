@@ -1,0 +1,39 @@
+{
+  "name": "inboxscout",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal lead discovery and responsible job-outreach workspace.",
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:watch": "node --import tsx --test --watch tests/*.test.ts"
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.12.4",
+    "@supabase/supabase-js": "2.112.3",
+    "cheerio": "1.2.0",
+    "lucide-react": "latest",
+    "next": "16.2.12",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "robots-parser": "latest",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "autoprefixer": "10.4.21",
+    "postcss": "8.5.26",
+    "tailwindcss": "3.4.17",
+    "tsx": "latest",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "postcss": "8.5.26",
+    "sharp": "0.35.3"
+  }
+}
