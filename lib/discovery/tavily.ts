@@ -33,7 +33,18 @@ export function parseTavilyResults(payload: TavilyResponse): SearchResult[] {
     }));
 }
 
-export async function tavilyWebSearch(query: string, count = 10): Promise<SearchResult[]> {
+export interface TavilySearchOptions {
+  /** "advanced" costs twice the credits but is required for usable Facebook/Instagram coverage. */
+  searchDepth?: "basic" | "advanced";
+  /** Real domain filtering. Tavily ignores Google-style `site:` text in the query. */
+  includeDomains?: string[];
+}
+
+export async function tavilyWebSearch(
+  query: string,
+  count = 10,
+  options: TavilySearchOptions = {},
+): Promise<SearchResult[]> {
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: {
@@ -44,13 +55,14 @@ export async function tavilyWebSearch(query: string, count = 10): Promise<Search
     body: JSON.stringify({
       query,
       topic: "general",
-      search_depth: "basic",
+      search_depth: options.searchDepth ?? "basic",
       max_results: Math.min(Math.max(count, 1), 20),
       include_answer: false,
       include_images: false,
       include_raw_content: false,
+      ...(options.includeDomains?.length ? { include_domains: options.includeDomains } : {}),
     }),
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(20_000),
     cache: "no-store",
   });
 

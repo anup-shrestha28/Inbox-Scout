@@ -176,6 +176,7 @@ export function InboxScoutApp() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [leadSearch, setLeadSearch] = useState("");
   const [leadFilter, setLeadFilter] = useState<"all" | LeadStatus>("all");
+  const [sourceFilter, setSourceFilter] = useState<Set<SourceType>>(new Set());
   const [updatingLeads, setUpdatingLeads] = useState(false);
 
   const [campaignOpen, setCampaignOpen] = useState(false);
@@ -234,6 +235,7 @@ export function InboxScoutApp() {
     const term = leadSearch.trim().toLowerCase();
     return leads.filter((lead) => {
       if (leadFilter !== "all" && lead.status !== leadFilter) return false;
+      if (sourceFilter.size && !sourceFilter.has(lead.sourceType)) return false;
       if (!term) return true;
       return [lead.name, lead.company, lead.role, lead.email, lead.location, lead.country]
         .filter(Boolean)
@@ -241,7 +243,7 @@ export function InboxScoutApp() {
         .toLowerCase()
         .includes(term);
     });
-  }, [leadFilter, leadSearch, leads]);
+  }, [leadFilter, leadSearch, leads, sourceFilter]);
 
   const stats = useMemo(() => {
     const sent = campaigns.reduce((sum, campaign) => sum + campaign.sent, 0);
@@ -265,6 +267,15 @@ export function InboxScoutApp() {
     );
   }
 
+  function toggleSourceFilter(source: SourceType) {
+    setSourceFilter((current) => {
+      const next = new Set(current);
+      if (next.has(source)) next.delete(source);
+      else next.add(source);
+      return next;
+    });
+  }
+
   async function runSearch(event: React.FormEvent) {
     event.preventDefault();
     setSearching(true);
@@ -280,7 +291,11 @@ export function InboxScoutApp() {
         leadType,
         deepScan,
       };
-      const payload = await responseJson<{ leads: Lead[]; addedCount?: number }>(
+      const payload = await responseJson<{
+        leads: Lead[];
+        addedCount?: number;
+        perSource?: Partial<Record<SourceType, number>>;
+      }>(
         await fetch("/api/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -296,7 +311,17 @@ export function InboxScoutApp() {
       }
       const count = payload.addedCount ?? payload.leads.length;
       setLastSearchCount(count);
-      notify(`Search completed with ${count} relevant result${count === 1 ? "" : "s"}.`, "success");
+      const breakdown = payload.perSource
+        ? sources
+            .map((source) => `${SOURCE_META[source].label} ${payload.perSource?.[source] ?? 0}`)
+            .join(" · ")
+        : "";
+      notify(
+        `Search found ${count} relevant result${count === 1 ? "" : "s"}${breakdown ? ` — ${breakdown}` : ""}.`,
+        count ? "success" : "neutral",
+      );
+      // Show exactly what this search targeted; the chips can be cleared anytime.
+      setSourceFilter(new Set(sources));
       setView("leads");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Search failed.", "error");
@@ -733,6 +758,21 @@ export function InboxScoutApp() {
                 <div className="leads-toolbar">
                   <label className="search-box"><Search size={17} /><input value={leadSearch} onChange={(event) => setLeadSearch(event.target.value)} placeholder="Search names, companies, roles…" /></label>
                   <div className="filter-wrap"><ListFilter size={16} /><select value={leadFilter} onChange={(event) => setLeadFilter(event.target.value as typeof leadFilter)}><option value="all">All statuses</option><option value="new">New</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="contacted">Contacted</option><option value="replied">Replied</option></select></div>
+                  <div className="source-filter" role="group" aria-label="Filter by source">
+                    {(Object.keys(SOURCE_META) as SourceType[]).map((source) => {
+                      const active = sourceFilter.has(source);
+                      return (
+                        <button key={source} type="button" className={`source-chip ${active ? "source-chip-on" : ""}`} title={`Show only ${SOURCE_META[source].label} leads`} onClick={() => toggleSourceFilter(source)}>
+                          {sourceIcon(source)} {SOURCE_META[source].label}
+                        </button>
+                      );
+                    })}
+                    {sourceFilter.size > 0 && (
+                      <button type="button" className="source-chip source-chip-clear" onClick={() => setSourceFilter(new Set())}>
+                        <X size={13} /> All
+                      </button>
+                    )}
+                  </div>
                   <span className="result-count">{filteredLeads.length} result{filteredLeads.length === 1 ? "" : "s"}</span>
                 </div>
 

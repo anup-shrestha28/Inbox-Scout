@@ -257,6 +257,11 @@ input::placeholder, textarea::placeholder { color: #b1b1bc; }
 .search-box input { height: 35px; padding: 0; border: 0; box-shadow: none; background: transparent; }
 .filter-wrap { height: 39px; padding: 0 9px; display: flex; align-items: center; gap: 5px; border: 1px solid var(--line-strong); border-radius: 9px; color: #8e8d98; }
 .filter-wrap select { height: 35px; width: 125px; padding: 0 20px 0 3px; border: 0; background: transparent; box-shadow: none; font-size: 11.5px; }
+.source-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.source-chip { height: 31px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: white; color: #777683; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: border-color 140ms ease, background 140ms ease, color 140ms ease; }
+.source-chip:hover { border-color: #c7c4d5; background: #fbfaff; }
+.source-chip-on { border-color: #aaa0ec; background: var(--purple-soft); color: var(--purple-dark); }
+.source-chip-clear { border-style: dashed; color: var(--purple); }
 .result-count { margin-left: auto; color: #a1a0aa; font-size: 10.5px; }
 .bulk-bar { min-height: 48px; padding: 8px 16px; display: flex; align-items: center; gap: 7px; background: var(--purple-soft); border-bottom: 1px solid #ddd6ff; }
 .bulk-bar > span { margin-right: 8px; color: #5e51a4; font-size: 11px; }

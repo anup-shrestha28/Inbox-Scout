@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 
 import { searchDemoLeads } from "@/lib/demo-data";
-import { isUsableDiscoveryResult, resultMatchesTargetRegion } from "@/lib/discovery/discover";
-import { buildDiscoveryQuery } from "@/lib/discovery/queries";
+import {
+  isUsableDiscoveryResult,
+  matchesRequestedWork,
+  resultMatchesTargetRegion,
+} from "@/lib/discovery/discover";
+import { buildDiscoveryRequest } from "@/lib/discovery/queries";
 import { decryptToken, encryptToken } from "@/lib/email/token-crypto";
 import { renderTemplate } from "@/lib/template";
 import type { SearchInput } from "@/lib/types";
@@ -21,22 +25,34 @@ const input: SearchInput = {
 };
 
 describe("discovery queries", () => {
-  it("uses site-restricted indexed discovery for social sources", () => {
-    const query = buildDiscoveryQuery(input, "linkedin");
-    assert.match(query, /site:linkedin\.com/);
-    assert.match(query, /"Email designer"/);
-    assert.match(query, /"Nepal"/);
+  it("scopes social sources through include_domains, not Google-style operators", () => {
+    const request = buildDiscoveryRequest(input, "linkedin");
+    assert.deepEqual(request.includeDomains, ["linkedin.com"]);
+    assert.equal(request.depth, "basic");
+    assert.match(request.query, /Email designer/);
+    assert.match(request.query, /Nepal/);
+    // Tavily treats these as plain keywords, so they must never appear.
+    assert.doesNotMatch(request.query, /site:/);
+    assert.doesNotMatch(request.query, /-jobs/);
+  });
+
+  it("uses advanced depth for Meta platforms, which basic depth cannot index usefully", () => {
+    assert.equal(buildDiscoveryRequest(input, "instagram").depth, "advanced");
+    assert.equal(buildDiscoveryRequest(input, "facebook").depth, "advanced");
+    assert.deepEqual(buildDiscoveryRequest(input, "facebook").includeDomains, ["facebook.com"]);
   });
 
   it("adds public contact intent to web searches", () => {
-    const query = buildDiscoveryQuery(input, "web");
-    assert.match(query, /email design and Klaviyo services/);
-    assert.match(query, /official website contact/);
-    assert.match(query, /-jobs -job -hiring -vacancy/);
+    const request = buildDiscoveryRequest(input, "web");
+    assert.equal(request.includeDomains, undefined);
+    assert.match(request.query, /email design and Klaviyo services/);
+    assert.match(request.query, /official website contact/);
+    assert.match(request.query, /-jobs -job -hiring -vacancy/);
   });
 
   it("strips an injected site operator from user text", () => {
-    assert.doesNotMatch(buildDiscoveryQuery({ ...input, query: "site:private.local hiring" }, "web"), /site:private\.local/);
+    const request = buildDiscoveryRequest({ ...input, query: "site:private.local hiring" }, "web");
+    assert.doesNotMatch(request.query, /site:private\.local/);
   });
 
   it("requires evidence that the result matches the requested region", () => {
@@ -97,6 +113,196 @@ describe("discovery queries", () => {
         nepalInput,
       ),
       true,
+    );
+  });
+});
+
+describe("social result relevance", () => {
+  const nepalInput: SearchInput = {
+    ...input,
+    roles: ["Email designer", "Email marketing agency", "Klaviyo designer"],
+    regionMode: "nepal",
+    countries: [],
+    cities: ["Kathmandu", "Lalitpur"],
+    sources: ["linkedin", "instagram", "facebook"],
+  };
+
+  it("keeps a LinkedIn profile that genuinely does email work in the region", () => {
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "linkedin",
+          title: "Rohan Shrestha - Co-founder @kraft - Kraft Email Marketing Agency",
+          url: "https://np.linkedin.com/in/rohan-shrestha-3105531a7",
+          snippet: "Kathmandu, Bāgmatī, Nepal · Turning clicks into loyal customers.",
+        },
+        nepalInput,
+      ),
+      true,
+    );
+  });
+
+  it("rejects profiles from unrelated fields even when the region matches", () => {
+    // The exact failure the user reported: a UI/UX designer and a student.
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "linkedin",
+          title: "Anupama Neupane - Clairify.ai",
+          url: "https://www.linkedin.com/in/anupama-neupane/",
+          snippet: "UI/UX Designer | Frontend Developer · Kathmandu, Bāgmatī, Nepal",
+        },
+        nepalInput,
+      ),
+      false,
+    );
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "linkedin",
+          title: "Agrani Thakuri Jha - Self employed",
+          url: "https://www.linkedin.com/in/agrani-thakuri-jha-46a93115b/",
+          snippet: "Student at St. Mary's high school, kathmandu · Nepal",
+        },
+        nepalInput,
+      ),
+      false,
+    );
+  });
+
+  it("rejects LinkedIn job posts, feed posts, and people directories by URL shape", () => {
+    for (const url of [
+      "https://np.linkedin.com/jobs/view/email-designer-at-mach33-media-445",
+      "https://www.linkedin.com/posts/digital-saugat_email-marketing-nepal",
+      "https://www.linkedin.com/pub/dir/Rohan/Shrestha",
+    ]) {
+      assert.equal(
+        isUsableDiscoveryResult(
+          { source: "linkedin", title: "Email marketing Nepal", url, snippet: "Kathmandu email marketing" },
+          nepalInput,
+        ),
+        false,
+        url,
+      );
+    }
+  });
+
+  it("rejects Facebook event/group posts and keeps real business pages", () => {
+    // The fashion-event post the user opened from their results.
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "facebook",
+          title: "Mydream TV USA's Post",
+          url: "https://www.facebook.com/MydreamTvusa/posts/get-ready-to-witness-elegance/1584",
+          snippet: "Miss Nepal contestants shine at the gala",
+          },
+        nepalInput,
+      ),
+      false,
+    );
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "facebook",
+          title: "Klaviyo Email Marketing Community | Job Post",
+          url: "https://www.facebook.com/groups/544033120196337/posts/1342853943647580",
+          snippet: "Kathmandu email designer wanted",
+        },
+        nepalInput,
+      ),
+      false,
+    );
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "facebook",
+          title: "Arambha Marketing Agency | Kathmandu",
+          url: "https://www.facebook.com/ArambhaMarketing",
+          snippet: "Email marketing campaigns and design for Nepali brands.",
+        },
+        nepalInput,
+      ),
+      true,
+    );
+  });
+
+  it("rejects Instagram posts/keyword pages and keeps relevant profile pages", () => {
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "instagram",
+          title: "Digital Marketing Agency in Kathmandu - Nepal",
+          url: "https://www.instagram.com/p/DXv0xJwgY1i",
+          snippet: "Email marketing Kathmandu",
+        },
+        nepalInput,
+      ),
+      false,
+    );
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "instagram",
+          title: "Online Marketing In Nepal",
+          url: "https://www.instagram.com/popular/online-marketing-in-nepal",
+          snippet: "email marketing Kathmandu",
+        },
+        nepalInput,
+      ),
+      false,
+    );
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "instagram",
+          title: "Queens Digital Agency (@queensdigitalnp) · Kathmandu",
+          url: "https://www.instagram.com/queensdigitalnp",
+          snippet: "Email marketing campaigns, newsletters, and design for brands in Nepal.",
+        },
+        nepalInput,
+      ),
+      true,
+    );
+  });
+
+  it("rejects results from a different platform than the ticked source", () => {
+    assert.equal(
+      isUsableDiscoveryResult(
+        {
+          source: "facebook",
+          title: "Email marketing agency Kathmandu",
+          url: "https://np.linkedin.com/company/kraftemails",
+          snippet: "Email marketing Nepal",
+        },
+        nepalInput,
+      ),
+      false,
+    );
+  });
+
+  it("recognizes everyday email-work vocabulary, not only exact role phrases", () => {
+    assert.equal(
+      matchesRequestedWork(
+        {
+          title: "Dipesh Shrestha - Co-Founder @ Gre8emails",
+          url: "https://np.linkedin.com/in/dipeshrestha82",
+          snippet: "Helping DTC brands turn email interactions into incremental revenue. Kathmandu.",
+        },
+        nepalInput,
+      ),
+      true,
+    );
+    assert.equal(
+      matchesRequestedWork(
+        {
+          title: "Hudson Valley Events and Activities",
+          url: "https://www.facebook.com/hudsonvalleyevents",
+          snippet: "Concerts, festivals, and family activities every weekend.",
+        },
+        nepalInput,
+      ),
+      false,
     );
   });
 });

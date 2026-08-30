@@ -26,10 +26,49 @@ function webServiceIntent(roles: string[]): string {
   return services.join(" and ");
 }
 
-export function buildDiscoveryQuery(input: SearchInput, source: SourceType): string {
-  const roles = quotedOr(input.roles);
-  const locations = locationTerms(input);
+const SOCIAL_DOMAIN: Partial<Record<SourceType, string>> = {
+  linkedin: "linkedin.com",
+  instagram: "instagram.com",
+  facebook: "facebook.com",
+};
+
+export interface DiscoveryRequest {
+  query: string;
+  depth: "basic" | "advanced";
+  includeDomains?: string[];
+}
+
+function naturalPlaces(input: SearchInput): string[] {
+  const places = [...input.cities];
+  if (input.regionMode !== "nepal") places.push(...input.countries);
+  if (input.regionMode !== "international") places.push("Nepal");
+  return [...new Set(places.map(safeTerm).filter(Boolean))].slice(0, 6);
+}
+
+export function buildDiscoveryRequest(input: SearchInput, source: SourceType): DiscoveryRequest {
   const extra = safeTerm(input.query);
+
+  const socialDomain = SOCIAL_DOMAIN[source];
+  if (socialDomain) {
+    // Tavily has no `site:` or `-term` operators — that syntax is treated as
+    // ordinary keywords and wrecks relevance. Domain scoping goes through the
+    // include_domains API parameter and the query stays natural language.
+    const roles = [...new Set(input.roles.map(safeTerm).filter(Boolean))].slice(0, 6);
+    const audience =
+      input.leadType === "person" ? "profile" : input.leadType === "agency" ? "company" : "";
+    const query = [`${roles.join(" or ")} in ${naturalPlaces(input).join(", ")}`, audience, extra]
+      .filter(Boolean)
+      .join(" ");
+    return {
+      query,
+      // Verified empirically: basic depth returns clean LinkedIn people results,
+      // while Facebook/Instagram surface almost nothing without advanced depth.
+      depth: source === "linkedin" ? "basic" : "advanced",
+      includeDomains: [socialDomain],
+    };
+  }
+
+  const locations = locationTerms(input);
   const typeTerm =
     input.leadType === "agency"
       ? "agency studio"
@@ -37,9 +76,8 @@ export function buildDiscoveryQuery(input: SearchInput, source: SourceType): str
         ? "designer specialist"
         : "agency studio designer";
 
-  const base = [roles, locations, typeTerm, extra].filter(Boolean).join(" ");
-  if (source === "linkedin") return `site:linkedin.com ${base} -jobs -job -hiring`;
-  if (source === "instagram") return `site:instagram.com ${base} -jobs -job -hiring`;
-  if (source === "facebook") return `site:facebook.com ${base} -jobs -job -hiring`;
-  return `${webServiceIntent(input.roles)} services ${locations} ${typeTerm} official website contact ${extra} -jobs -job -hiring -vacancy -linkedin -directory -marketplace`;
+  return {
+    query: `${webServiceIntent(input.roles)} services ${locations} ${typeTerm} official website contact ${extra} -jobs -job -hiring -vacancy -linkedin -directory -marketplace`,
+    depth: "basic",
+  };
 }

@@ -1,16 +1,21 @@
+import { canonicalProfileKey } from "@/lib/discovery/discover";
 import { createClient } from "@/lib/supabase/server";
 import type { Lead, LeadStatus } from "@/lib/types";
 import { mapLead } from "@/lib/repositories/mappers";
 
-function storageKey(lead: Pick<Lead, "email" | "websiteUrl" | "company">): string {
+function storageKey(lead: Pick<Lead, "email" | "websiteUrl" | "company" | "sourceUrl">): string {
   if (lead.email) return `email:${lead.email.toLowerCase()}`;
   if (lead.websiteUrl) {
     try {
       return `host:${new URL(lead.websiteUrl).hostname.replace(/^www\./, "")}`;
     } catch {
-      // Continue with company matching.
+      // Continue with the other identifiers.
     }
   }
+  // Social profiles have no email or website yet; the profile URL is the only
+  // identity that keeps two people at the same company from merging.
+  const profileKey = canonicalProfileKey(lead.sourceUrl);
+  if (profileKey) return `url:${profileKey}`;
   return `company:${lead.company.toLowerCase().replace(/\W+/g, "")}`;
 }
 

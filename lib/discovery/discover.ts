@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { tavilyWebSearch, type SearchResult } from "@/lib/discovery/tavily";
-import { buildDiscoveryQuery } from "@/lib/discovery/queries";
+import { buildDiscoveryRequest } from "@/lib/discovery/queries";
 import { scanPublicWebsite } from "@/lib/extraction/contact-extractor";
 import { extractEmails } from "@/lib/extraction/email";
 import {
@@ -26,6 +26,115 @@ const COUNTRY_ALIASES: Record<string, string[]> = {
   "united states": ["united states", "usa", "u.s.a", "u.s."],
   "united kingdom": ["united kingdom", "uk", "u.k."],
 };
+
+// ---------------------------------------------------------------------------
+// Social profile URL rules. Search indexes return posts, job listings, and
+// directory pages from these platforms; only actual profile/page URLs are
+// contactable leads.
+// ---------------------------------------------------------------------------
+
+const FACEBOOK_RESERVED_SEGMENTS = new Set([
+  "events", "groups", "watch", "marketplace", "gaming", "live", "hashtag", "share",
+  "reel", "reels", "stories", "story.php", "permalink.php", "photo", "photos",
+  "video", "videos", "posts", "notes", "help", "business", "policies", "legal",
+  "login", "public", "search", "people", "directory",
+]);
+
+const INSTAGRAM_RESERVED_SEGMENTS = new Set([
+  "p", "reel", "reels", "explore", "tv", "stories", "accounts", "popular",
+  "directory", "tags", "locations", "web", "about", "legal",
+]);
+
+function socialProfilePathAllowed(
+  source: SourceType,
+  pathname: string,
+  leadType: SearchInput["leadType"],
+): boolean {
+  const segments = pathname.split("/").filter(Boolean).map((segment) => segment.toLowerCase());
+
+  if (source === "linkedin") {
+    if (segments[0] === "in" && segments.length === 2) return leadType !== "agency";
+    if (segments[0] === "company" && segments.length >= 2) return leadType !== "person";
+    return false;
+  }
+  if (source === "facebook") {
+    if (!segments.length) return false;
+    if (segments.some((segment) => FACEBOOK_RESERVED_SEGMENTS.has(segment))) return false;
+    if (segments.length === 1) return true; // facebook.com/pagename
+    if (segments[0] === "p" && segments.length === 2) return true; // facebook.com/p/Page-Name-123
+    if (segments[0] === "pages") return true; // legacy facebook.com/pages/Name/id
+    return false;
+  }
+  if (source === "instagram") {
+    return segments.length === 1 && !INSTAGRAM_RESERVED_SEGMENTS.has(segments[0]);
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Role relevance. Social snippets cannot be website-scanned, so the title and
+// snippet themselves must show evidence of the requested kind of work —
+// otherwise students, UI/UX designers, and event posts slip through.
+// ---------------------------------------------------------------------------
+
+const GENERIC_ROLE_TAILS = new Set([
+  "designer", "designers", "design", "agency", "agencies", "studio", "studios",
+  "specialist", "specialists", "expert", "experts", "consultant", "consultants",
+  "freelancer", "freelancers", "marketer", "marketers", "manager", "managers",
+  "company", "companies", "service", "services", "professional", "professionals",
+]);
+
+const GENERIC_SINGLE_TERMS = new Set([
+  "email", "digital", "marketing", "design", "creative", "media", "web", "online",
+  "brand", "branding", "social", "content",
+]);
+
+function normalizeMatchText(value: string): string {
+  return value.toLowerCase().replace(/e[-‑]mail/g, "email");
+}
+
+function phrasePattern(phrase: string): RegExp {
+  const words = phrase
+    .split(/\s+/)
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`\\b${words.join("\\s+")}s?\\b`, "i");
+}
+
+export function buildRoleMatchers(input: SearchInput): RegExp[] {
+  const phrases = new Set<string>();
+  for (const raw of [...input.roles, ...input.query.split(/[,;]/)]) {
+    const phrase = normalizeMatchText(raw)
+      .replace(/[^a-z0-9\s-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (phrase.length < 3) continue;
+    phrases.add(phrase);
+    const words = phrase.split(" ");
+    if (words.length >= 2 && GENERIC_ROLE_TAILS.has(words[words.length - 1])) {
+      const head = words.slice(0, -1).join(" ");
+      // "email marketing agency" → "email marketing" is still distinctive;
+      // "email designer" → bare "email" would match contact lines, so skip it.
+      if (words.length - 1 >= 2 || !GENERIC_SINGLE_TERMS.has(head)) phrases.add(head);
+    }
+  }
+
+  const matchers = [...phrases].map(phrasePattern);
+  if ([...phrases].some((phrase) => phrase.includes("email"))) {
+    // The search is about email work, so recognize its everyday vocabulary too
+    // ("turn email interactions into revenue", "newsletter design", Klaviyo...).
+    matchers.push(
+      /\bemails?\b[^.\n]{0,60}?\b(marketing|market\w*|design\w*|campaign\w*|flows?|automation|templates?|strateg\w*|retention|revenue)\b/i,
+      /\b(marketing|design\w*|campaign\w*|flows?|automation|strateg\w*|retention|lifecycle)\b[^.\n]{0,60}?\bemails?\b/i,
+      /\b(newsletters?|klaviyo|mailchimp|omnisend)\b/i,
+    );
+  }
+  return matchers;
+}
+
+export function matchesRequestedWork(result: SearchResult, input: SearchInput): boolean {
+  const text = normalizeMatchText(`${result.title} ${result.snippet}`);
+  return buildRoleMatchers(input).some((matcher) => matcher.test(text));
+}
 
 function normalizedResultText(result: SearchResult): string {
   let url = result.url;
@@ -110,6 +219,10 @@ export function isUsableDiscoveryResult(result: SourcedResult, input: SearchInpu
   const expectedSocialDomain = SOCIAL_SOURCE_DOMAINS[result.source];
   if (expectedSocialDomain) {
     if (!(host === expectedSocialDomain || host.endsWith(`.${expectedSocialDomain}`))) return false;
+    // Only actual profile/page URLs; posts, jobs, groups, and directories are noise.
+    if (!socialProfilePathAllowed(result.source, pathname, input.leadType)) return false;
+    // The profile itself must show evidence of the requested kind of work.
+    if (!matchesRequestedWork(result, input)) return false;
   } else if (isNonOfficialDiscoveryHost(host)) {
     return false;
   }
@@ -121,7 +234,7 @@ export function isUsableDiscoveryResult(result: SourcedResult, input: SearchInpu
 function cleanResultTitle(title: string): string {
   return title
     .replace(/<[^>]+>/g, "")
-    .replace(/\s*[|·–—-]\s*(LinkedIn|Instagram|Facebook).*$/i, "")
+    .replace(/\s*[|·•–—-]\s*(LinkedIn|Instagram|Facebook).*$/i, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
@@ -132,6 +245,40 @@ function kindFromResult(result: SourcedResult, input: SearchInput): LeadKind {
   return /\b(agency|studio|company|collective|team)\b/i.test(`${result.title} ${result.snippet}`)
     ? "agency"
     : "person";
+}
+
+/** Turns raw search titles into a readable name/company for social profiles. */
+function socialIdentity(
+  result: SourcedResult,
+): { name: string; company: string; kind: LeadKind } | null {
+  let pathname = "";
+  try {
+    pathname = new URL(result.url).pathname;
+  } catch {
+    return null;
+  }
+  const cleaned = cleanResultTitle(result.title);
+
+  if (result.source === "linkedin") {
+    // Person titles look like "Name - Headline | Employer"; keep the headline
+    // as the company column so the user sees what the person does.
+    const segments = cleaned.split(/\s+[-–—]\s+/);
+    if (/^\/in\//.test(pathname)) {
+      const name = segments[0]?.trim() || cleaned;
+      const headline = segments.slice(1).join(" - ").trim();
+      return { name, company: headline.slice(0, 90) || name, kind: "person" };
+    }
+    const name = segments[0]?.trim() || cleaned;
+    return { name, company: name, kind: "agency" };
+  }
+
+  // Instagram/Facebook page titles: "Page Name (@handle) · City" / "Page | City".
+  const handleMatch = cleaned.match(/^(.*?)\s*\(@([\w.]+)\)/);
+  const pathHandle = pathname.split("/").filter(Boolean)[0] ?? "";
+  const base = (handleMatch?.[1] ?? cleaned.split(/\s*[|·•]\s*/)[0] ?? cleaned).trim();
+  const handle = handleMatch?.[2] ?? (result.source === "instagram" ? pathHandle : "");
+  const name = base || (handle ? `@${handle}` : cleaned);
+  return { name, company: handle ? `@${handle}` : name, kind: "agency" };
 }
 
 function socialUrls(source: SourceType, url: string) {
@@ -146,16 +293,19 @@ function resultLead(result: SourcedResult, input: SearchInput): Lead {
   const title = cleanResultTitle(result.title) || new URL(result.url).hostname;
   // Social result content is not copied or mined for email addresses. It is
   // retained only as a profile URL for the user's manual review.
-  const emails = result.source === "web" ? extractEmails(result.snippet) : [];
+  const isSocial = result.source !== "web";
+  const emails = isSocial ? [] : extractEmails(result.snippet);
   const email = emails[0] ?? null;
   const social = socialUrls(result.source, result.url);
   const place = verifiedLocation(result, input);
+  const identity = isSocial ? socialIdentity(result) : null;
+  const snippetEvidence = result.snippet.replace(/\s+/g, " ").trim().slice(0, 240);
 
   return {
     id: randomUUID(),
-    kind: kindFromResult(result, input),
-    name: title,
-    company: title,
+    kind: identity?.kind ?? kindFromResult(result, input),
+    name: identity?.name ?? title,
+    company: identity?.company ?? title,
     role: input.roles[0] ?? "Email design",
     email,
     ...place,
@@ -166,7 +316,10 @@ function resultLead(result: SourcedResult, input: SearchInput): Lead {
     confidence: email ? 78 : 48,
     status: "new",
     emailPublic: Boolean(email),
-    evidence: email ? result.snippet.slice(0, 240) : "Public search result; contact details need review.",
+    evidence:
+      email || (isSocial && snippetEvidence)
+        ? snippetEvidence
+        : "Public search result; contact details need review.",
     createdAt: new Date().toISOString(),
   };
 }
@@ -191,15 +344,34 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/**
+ * Canonical profile identity: same LinkedIn profile appears under both
+ * np.linkedin.com and www.linkedin.com, so country subdomains are folded away.
+ */
+export function canonicalProfileKey(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl);
+    let host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (/^[a-z]{2}\.linkedin\.com$/.test(host)) host = "linkedin.com";
+    return `${host}${url.pathname.replace(/\/+$/, "").toLowerCase()}`;
+  } catch {
+    return null;
+  }
+}
+
 function mergeKey(lead: Lead): string {
   if (lead.websiteUrl) {
     try {
       return `host:${new URL(lead.websiteUrl).hostname.replace(/^www\./, "")}`;
     } catch {
-      // Fall through to the normalized company name.
+      // Fall through to the other identifiers.
     }
   }
   if (lead.email) return `email:${lead.email.toLowerCase()}`;
+  // Two people at the same agency are different leads; the profile URL is the
+  // only safe identity for social results without an email or website.
+  const profileKey = canonicalProfileKey(lead.sourceUrl);
+  if (profileKey) return `url:${profileKey}`;
   return `name:${lead.company.toLowerCase().replace(/\W+/g, "")}`;
 }
 
@@ -229,9 +401,22 @@ function mergeLeads(leads: Lead[]): Lead[] {
 
 export async function discoverLeads(input: SearchInput): Promise<Lead[]> {
   const batches = await Promise.all(
-    input.sources.map(async (source) => {
-      const results = await tavilyWebSearch(buildDiscoveryQuery(input, source), source === "web" ? 12 : 8);
-      return results.map((result) => ({ ...result, source }));
+    input.sources.map(async (source): Promise<SourcedResult[]> => {
+      try {
+        const request = buildDiscoveryRequest(input, source);
+        const results = await tavilyWebSearch(request.query, 12, {
+          searchDepth: request.depth,
+          includeDomains: request.includeDomains,
+        });
+        return results.map((result) => ({ ...result, source }));
+      } catch (error) {
+        // One provider hiccup must not sink the other selected sources.
+        console.warn(
+          `[discover] ${source} search failed:`,
+          error instanceof Error ? error.message : error,
+        );
+        return [];
+      }
     }),
   );
   const sourced = batches.flat().filter((result) => isUsableDiscoveryResult(result, input));

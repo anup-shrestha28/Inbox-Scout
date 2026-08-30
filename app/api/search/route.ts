@@ -57,6 +57,12 @@ export async function POST(request: Request) {
     searchId = search.id;
 
     const discovered = await discoverLeads(parsed.data);
+    const perSource = Object.fromEntries(
+      parsed.data.sources.map((source) => [
+        source,
+        discovered.filter((lead) => lead.sourceType === source).length,
+      ]),
+    );
     const leads = await saveDiscoveredLeads(user.id, search.id, discovered);
     await supabase
       .from("searches")
@@ -68,7 +74,7 @@ export async function POST(request: Request) {
       .eq("id", search.id)
       .eq("user_id", user.id);
 
-    return NextResponse.json({ leads, addedCount: discovered.length, demo: false });
+    return NextResponse.json({ leads, addedCount: discovered.length, perSource, demo: false });
   } catch (error) {
     if (searchId && !isDemoMode) {
       try {
