@@ -9,7 +9,7 @@ export function hasSupabaseConfig(): boolean {
 }
 
 export function hasSearchConfig(): boolean {
-  return isDemoMode || Boolean(process.env.BRAVE_SEARCH_API_KEY);
+  return isDemoMode || Boolean(process.env.TAVILY_API_KEY);
 }
 
 export function hasGmailConfig(): boolean {

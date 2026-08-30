@@ -64,6 +64,19 @@ export function extractEmails(input: string): string[] {
   return [...new Set(found.map(trimEmail).filter(isUsefulPublicEmail))];
 }
 
+export function extractVisibleEmails(html: string): string[] {
+  const $ = cheerio.load(html);
+  $("script,style,noscript,template,svg,head").remove();
+
+  const mailLinks = $("a[href^='mailto:']")
+    .toArray()
+    .map((element) => $(element).attr("href") ?? "")
+    .join(" ");
+  const visibleText = $.root().text();
+
+  return extractEmails(`${visibleText} ${mailLinks}`);
+}
+
 export function isGenericMailbox(email: string): boolean {
   const localPart = trimEmail(email).split("@")[0];
   return GENERIC_PREFIXES.has(localPart);
@@ -71,6 +84,7 @@ export function isGenericMailbox(email: string): boolean {
 
 export function extractEmailEvidence(html: string, email: string): string | null {
   const $ = cheerio.load(html);
+  $("script,style,noscript,template,svg,head").remove();
   const mailLink = $("a[href^='mailto:']")
     .filter((_index, element) => {
       const href = $(element).attr("href") ?? "";

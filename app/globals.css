@@ -327,7 +327,7 @@ input::placeholder, textarea::placeholder { color: #b1b1bc; }
 .connection-brand { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; }
 .gmail-brand { color: #c24d5d; background: #fff0f1; }
 .supabase-brand { color: var(--green); background: var(--green-soft); }
-.brave-brand { color: var(--amber); background: var(--amber-soft); }
+.tavily-brand { color: var(--amber); background: var(--amber-soft); }
 .connection-copy { margin-top: 15px; }
 .connection-copy > div { display: flex; align-items: center; gap: 8px; }
 .connection-copy h3 { margin: 0; font: 750 15px var(--font-display); }

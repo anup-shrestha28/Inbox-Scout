@@ -15,6 +15,59 @@ const RESTRICTED_SOCIAL_DOMAINS = [
   "fb.com",
 ];
 
+// These sites can be useful discovery indexes, but they are not the contact's
+// official website. Scanning them produces unrelated platform/support emails
+// and, in some cases, addresses embedded in page data for other listings.
+const NON_OFFICIAL_DISCOVERY_DOMAINS = [
+  "behance.net",
+  "careerjet.com",
+  "clutch.co",
+  "designrush.com",
+  "designcrowd.com",
+  "dribbble.com",
+  "fiverr.com",
+  "glassdoor.com",
+  "goodfirms.co",
+  "heroagencies.com",
+  "indeed.com",
+  "itrelevant.com",
+  "jobgether.com",
+  "jobstreet.com",
+  "jooble.org",
+  "nepalyp.com",
+  "peopleperhour.com",
+  "99designs.com",
+  "guru.com",
+  "remoteok.com",
+  "remoteotter.com",
+  "scribd.com",
+  "shine.com",
+  "simplyhired.com",
+  "smergers.com",
+  "sortlist.com",
+  "techbehemoths.com",
+  "tiktok.com",
+  "toptal.com",
+  "twine.net",
+  "upwork.com",
+  "wellfound.com",
+  "weworkremotely.com",
+  "ziprecruiter.com",
+];
+
+const NON_OFFICIAL_HOST_PARTS = [
+  "freelancer.",
+  "indeed.",
+  "glassdoor.",
+  "jobgether.",
+  "jobstreet.",
+  "jooble.",
+  "remoteotter.",
+  "shine.",
+  "twine.",
+  "upwork.",
+];
+
 function isPrivateIpv4(address: string): boolean {
   const octets = address.split(".").map(Number);
   if (octets.length !== 4 || octets.some((part) => Number.isNaN(part))) return true;
@@ -64,6 +117,17 @@ export function isRestrictedSocialHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^www\./, "");
   return RESTRICTED_SOCIAL_DOMAINS.some(
     (domain) => host === domain || host.endsWith(`.${domain}`),
+  );
+}
+
+export function isNonOfficialDiscoveryHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^www\./, "");
+  return (
+    isRestrictedSocialHost(host) ||
+    NON_OFFICIAL_DISCOVERY_DOMAINS.some(
+      (domain) => host === domain || host.endsWith(`.${domain}`),
+    ) ||
+    NON_OFFICIAL_HOST_PARTS.some((part) => host === part.slice(0, -1) || host.includes(part))
   );
 }
 

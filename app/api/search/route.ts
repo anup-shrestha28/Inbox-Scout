@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     }
     if (!hasSearchConfig()) {
       return NextResponse.json(
-        { error: "Add BRAVE_SEARCH_API_KEY to enable live discovery." },
+        { error: "Add TAVILY_API_KEY to enable live discovery." },
         { status: 503 },
       );
     }
@@ -88,4 +88,3 @@ export async function POST(request: Request) {
     return apiError(error, "Lead discovery failed.");
   }
 }
-

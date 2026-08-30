@@ -4,10 +4,15 @@ import { describe, it } from "node:test";
 import {
   extractEmailEvidence,
   extractEmails,
+  extractVisibleEmails,
   isGenericMailbox,
   isUsefulPublicEmail,
 } from "@/lib/extraction/email";
-import { isPrivateIp, isRestrictedSocialHost } from "@/lib/extraction/network";
+import {
+  isNonOfficialDiscoveryHost,
+  isPrivateIp,
+  isRestrictedSocialHost,
+} from "@/lib/extraction/network";
 
 describe("public email extraction", () => {
   it("extracts, normalizes, and deduplicates published emails", () => {
@@ -35,6 +40,19 @@ describe("public email extraction", () => {
     const html = `<section><h2>Careers</h2><p>Send your CV to <a href="mailto:jobs@studio.co">jobs@studio.co</a></p></section>`;
     assert.match(extractEmailEvidence(html, "jobs@studio.co") ?? "", /Send your CV/);
   });
+
+  it("does not extract addresses hidden in scripts or page metadata", () => {
+    const html = `
+      <html>
+        <head><meta content="hidden@tracking.example"></head>
+        <body>
+          <script>window.data = {"email":"unrelated@gmail.com"}</script>
+          <p>Contact <a href="mailto:hello@studio.co">hello@studio.co</a></p>
+        </body>
+      </html>`;
+    assert.deepEqual(extractVisibleEmails(html), ["hello@studio.co"]);
+    assert.equal(extractEmailEvidence(html, "unrelated@gmail.com"), null);
+  });
 });
 
 describe("network scanning guardrails", () => {
@@ -50,5 +68,13 @@ describe("network scanning guardrails", () => {
     assert.equal(isRestrictedSocialHost("www.linkedin.com"), true);
     assert.equal(isRestrictedSocialHost("business.instagram.com"), true);
     assert.equal(isRestrictedSocialHost("agency.example"), false);
+  });
+
+  it("recognizes job boards and marketplaces as non-official websites", () => {
+    assert.equal(isNonOfficialDiscoveryHost("ca.indeed.com"), true);
+    assert.equal(isNonOfficialDiscoveryHost("www.freelancer.no"), true);
+    assert.equal(isNonOfficialDiscoveryHost("www.shine.com"), true);
+    assert.equal(isNonOfficialDiscoveryHost("www.designcrowd.com"), true);
+    assert.equal(isNonOfficialDiscoveryHost("agency.com.np"), false);
   });
 });

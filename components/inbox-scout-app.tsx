@@ -834,8 +834,8 @@ export function InboxScoutApp() {
                 </article>
 
                 <article className="panel connection-card">
-                  <div className="connection-brand brave-brand"><Search size={22} /></div>
-                  <div className="connection-copy"><div><h3>Brave Search</h3>{bootstrap.searchConfigured ? <span className="connected-pill"><i /> Ready</span> : <span className="not-connected-pill">Key needed</span>}</div><p>Find public business websites and indexed social-profile URLs without scraping search pages.</p></div>
+                  <div className="connection-brand tavily-brand"><Search size={22} /></div>
+                  <div className="connection-copy"><div><h3>Tavily Search</h3>{bootstrap.searchConfigured ? <span className="connected-pill"><i /> Ready</span> : <span className="not-connected-pill">Key needed</span>}</div><p>Find public business websites and indexed social-profile URLs without scraping search pages.</p></div>
                   <div className="connection-actions"><span className="read-only-note"><Globe2 size={15} /> Public index</span></div>
                 </article>
               </div>

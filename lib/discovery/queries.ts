@@ -16,6 +16,16 @@ function locationTerms(input: SearchInput): string {
   return places.length ? quotedOr(places) : input.regionMode === "international" ? "international remote" : "Nepal";
 }
 
+function webServiceIntent(roles: string[]): string {
+  const joined = roles.map(safeTerm).join(" ").toLowerCase();
+  const services: string[] = [];
+  if (joined.includes("email marketing")) services.push("email marketing");
+  if (joined.includes("email design") || joined.includes("email designer")) services.push("email design");
+  if (joined.includes("klaviyo")) services.push("Klaviyo");
+  if (!services.length) services.push(...roles.map(safeTerm).filter(Boolean).slice(0, 3));
+  return services.join(" and ");
+}
+
 export function buildDiscoveryQuery(input: SearchInput, source: SourceType): string {
   const roles = quotedOr(input.roles);
   const locations = locationTerms(input);
@@ -25,12 +35,11 @@ export function buildDiscoveryQuery(input: SearchInput, source: SourceType): str
       ? "agency studio"
       : input.leadType === "person"
         ? "designer specialist"
-        : "agency OR designer";
+        : "agency studio designer";
 
   const base = [roles, locations, typeTerm, extra].filter(Boolean).join(" ");
-  if (source === "linkedin") return `site:linkedin.com ${base}`;
-  if (source === "instagram") return `site:instagram.com ${base}`;
-  if (source === "facebook") return `site:facebook.com ${base}`;
-  return `${base} (contact OR careers OR jobs OR team)`;
+  if (source === "linkedin") return `site:linkedin.com ${base} -jobs -job -hiring`;
+  if (source === "instagram") return `site:instagram.com ${base} -jobs -job -hiring`;
+  if (source === "facebook") return `site:facebook.com ${base} -jobs -job -hiring`;
+  return `${webServiceIntent(input.roles)} services ${locations} ${typeTerm} official website contact ${extra} -jobs -job -hiring -vacancy -linkedin -directory -marketplace`;
 }
-

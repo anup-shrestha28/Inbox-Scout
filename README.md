@@ -5,7 +5,7 @@ InboxScout is a personal lead-research and responsible job-outreach workspace fo
 ## What is included
 
 - Nepal, international, and combined search modes
-- Brave Search API discovery for web and indexed public profile URLs
+- Tavily Search API discovery for web and indexed public profile URLs
 - Restricted website scanning with `robots.txt`, SSRF protection, redirect limits, page limits, and response-size limits
 - Published-email extraction with evidence and confidence scoring
 - Supabase Auth, Postgres, Row Level Security, private CV Storage, and Cron integration
@@ -27,7 +27,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The example environment enables demo mode by default, so no external account or API key is required.
+Open [http://localhost:5000](http://localhost:5000). The example environment enables demo mode by default, so no external account or API key is required.
 
 The demo exercises the entire interface and server workflow but does not call Brave, Supabase, or Gmail. All demo names, domains, and messages are fictional.
 
@@ -42,7 +42,7 @@ npm audit
 
 ## Enable live mode
 
-Follow [docs/LIVE_SETUP.md](docs/LIVE_SETUP.md) to configure Supabase, Brave Search, Google OAuth, the Edge Functions, and Supabase Cron.
+Follow [docs/LIVE_SETUP.md](docs/LIVE_SETUP.md) to configure Supabase, Tavily Search, Google OAuth, the Edge Functions, and Supabase Cron.
 
 The minimum live environment is:
 
@@ -52,7 +52,7 @@ NEXT_PUBLIC_APP_URL=https://your-app.example
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SECRET_KEY=...
-BRAVE_SEARCH_API_KEY=...
+TAVILY_API_KEY=...
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=https://your-app.example/api/gmail/callback
@@ -67,7 +67,7 @@ Never expose `SUPABASE_SECRET_KEY`, `GOOGLE_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KE
 ```text
 Next.js web application
 ├── Supabase Auth → personal sign-in
-├── Brave Search → candidate public URLs
+├── Tavily Search → candidate public URLs
 ├── Contact extractor → limited official-site scan
 ├── Supabase Postgres → searches, leads, campaigns, events
 ├── Supabase Storage → private PDF CV bucket
@@ -81,7 +81,7 @@ The primary database migration is at `supabase/migrations/202608240001_initial_s
 ## Important operating rules
 
 - Review the source and evidence for each contact before approval.
-- Use a Brave plan that permits your intended handling of search results. InboxScout avoids storing raw API responses and saves only the lead record and source URL needed for review.
+- Use a Tavily plan that permits your intended handling of search results. InboxScout avoids storing raw API responses and saves only the lead record and source URL needed for review.
 - Keep daily sending conservative. The application defaults to 12–15 messages per day and enforces a maximum of 50.
 - Honor replies and removal requests by adding contacts to the suppression list.
 - Keep the app and OAuth consent screen private while it is only for your own use.

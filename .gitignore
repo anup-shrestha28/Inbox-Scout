@@ -10,3 +10,7 @@ coverage/
 .DS_Store
 .vercel/
 .supabase/
+
+# AI session transcripts. These can contain pasted credentials.
+codex-session-*.md
+*-session-*.md

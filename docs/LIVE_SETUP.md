@@ -9,7 +9,7 @@ This guide turns InboxScout's safe demo into a hosted personal application. Comp
 3. Run the complete contents of [`supabase/migrations/202608240001_initial_schema.sql`](../supabase/migrations/202608240001_initial_schema.sql).
 4. Confirm that the `cvs` bucket appears under Storage and is private.
 5. Under **Authentication → URL Configuration**, set the production site URL and add:
-   - `http://localhost:3000/auth/callback`
+   - `http://localhost:5000/auth/callback`
    - `https://YOUR_DOMAIN/auth/callback`
 6. Keep email magic-link authentication enabled.
 
@@ -21,13 +21,13 @@ Copy these values from **Settings → API Keys** (or the project's **Connect** d
 - Publishable key (`sb_publishable_...`) → `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 - Secret key (`sb_secret_...`) → `SUPABASE_SECRET_KEY` (server only)
 
-## 2. Create the Brave Search key
+## 2. Create the Tavily Search key
 
-1. Create a Brave Search API account and subscribe to an appropriate plan.
-2. Generate a key.
-3. Save it as `BRAVE_SEARCH_API_KEY` only on the server.
+1. Create a Tavily account and select the free Researcher plan.
+2. Generate a development key and set a conservative monthly credit limit.
+3. Save it as `TAVILY_API_KEY` only on the server.
 
-InboxScout calls the official Web Search endpoint and never scrapes a search-results page. Review Brave's current storage terms for your selected plan. The app deliberately avoids retaining the raw API response.
+InboxScout calls the official Tavily Search endpoint and never scrapes a search-results page. Review Tavily's current terms for your selected plan. The app deliberately avoids retaining the raw API response.
 
 ## 3. Configure Google OAuth and Gmail
 
@@ -37,7 +37,7 @@ InboxScout calls the official Web Search endpoint and never scrapes a search-res
 4. Configure the OAuth consent screen. While the app is personal, keep it in testing/private use and add your own Google account as a test user.
 5. Create an **OAuth client ID** of type **Web application**.
 6. Add both callback URLs as authorized redirect URIs:
-   - `http://localhost:3000/api/gmail/callback`
+   - `http://localhost:5000/api/gmail/callback`
    - `https://YOUR_DOMAIN/api/gmail/callback`
 7. Add these scopes to the consent configuration:
    - `openid`

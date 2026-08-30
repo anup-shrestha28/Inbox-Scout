@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 
 import { searchDemoLeads } from "@/lib/demo-data";
+import { isUsableDiscoveryResult, resultMatchesTargetRegion } from "@/lib/discovery/discover";
 import { buildDiscoveryQuery } from "@/lib/discovery/queries";
 import { decryptToken, encryptToken } from "@/lib/email/token-crypto";
 import { renderTemplate } from "@/lib/template";
@@ -28,11 +29,75 @@ describe("discovery queries", () => {
   });
 
   it("adds public contact intent to web searches", () => {
-    assert.match(buildDiscoveryQuery(input, "web"), /contact OR careers OR jobs OR team/);
+    const query = buildDiscoveryQuery(input, "web");
+    assert.match(query, /email design and Klaviyo services/);
+    assert.match(query, /official website contact/);
+    assert.match(query, /-jobs -job -hiring -vacancy/);
   });
 
   it("strips an injected site operator from user text", () => {
     assert.doesNotMatch(buildDiscoveryQuery({ ...input, query: "site:private.local hiring" }, "web"), /site:private\.local/);
+  });
+
+  it("requires evidence that the result matches the requested region", () => {
+    const nepalInput = { ...input, regionMode: "nepal" as const, countries: [] };
+    assert.equal(
+      resultMatchesTargetRegion(
+        { title: "Email studio in Kathmandu", url: "https://studio.example/about", snippet: "Based in Nepal" },
+        nepalInput,
+      ),
+      true,
+    );
+    assert.equal(
+      resultMatchesTargetRegion(
+        { title: "Email studio", url: "https://studio.example/about", snippet: "A global creative team" },
+        nepalInput,
+      ),
+      false,
+    );
+  });
+
+  it("rejects job boards, marketplace pages, job posts, and social pages returned as web results", () => {
+    const nepalInput = { ...input, regionMode: "nepal" as const, countries: [] };
+    assert.equal(
+      isUsableDiscoveryResult(
+        { source: "web", title: "Email Designer Jobs", url: "https://ca.indeed.com/jobs?q=email", snippet: "Nepal" },
+        nepalInput,
+      ),
+      false,
+    );
+    assert.equal(
+      isUsableDiscoveryResult(
+        { source: "web", title: "Klaviyo Designer", url: "https://freelancer.co.za/projects/design", snippet: "Nepal" },
+        nepalInput,
+      ),
+      false,
+    );
+    assert.equal(
+      isUsableDiscoveryResult(
+        { source: "web", title: "Studio hiring email designer", url: "https://studio.com/careers", snippet: "Kathmandu" },
+        nepalInput,
+      ),
+      false,
+    );
+    assert.equal(
+      isUsableDiscoveryResult(
+        { source: "web", title: "Nepal email designer", url: "https://np.linkedin.com/in/designer", snippet: "Kathmandu" },
+        nepalInput,
+      ),
+      false,
+    );
+  });
+
+  it("keeps a region-matched official website", () => {
+    const nepalInput = { ...input, regionMode: "nepal" as const, countries: [] };
+    assert.equal(
+      isUsableDiscoveryResult(
+        { source: "web", title: "Acme Email Studio", url: "https://acme.com.np/contact", snippet: "Kathmandu creative team" },
+        nepalInput,
+      ),
+      true,
+    );
   });
 });
 

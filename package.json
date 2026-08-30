@@ -4,12 +4,14 @@
   "private": true,
   "description": "Personal lead discovery and responsible job-outreach workspace.",
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev --webpack -p 5000",
     "build": "next build --webpack",
-    "start": "next start",
+    "start": "next start -p 5000",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "test:watch": "node --import tsx --test --watch tests/*.test.ts"
+    "test:watch": "node --import tsx --test --watch tests/*.test.ts",
+    "send:preview": "node --import tsx --env-file=.env scripts/send-queued.ts",
+    "send": "node --import tsx --env-file=.env scripts/send-queued.ts --send"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",

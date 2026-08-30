@@ -1,14 +1,121 @@
 import { randomUUID } from "node:crypto";
 
-import { braveWebSearch, type SearchResult } from "@/lib/discovery/brave";
+import { tavilyWebSearch, type SearchResult } from "@/lib/discovery/tavily";
 import { buildDiscoveryQuery } from "@/lib/discovery/queries";
 import { scanPublicWebsite } from "@/lib/extraction/contact-extractor";
 import { extractEmails } from "@/lib/extraction/email";
-import { isRestrictedSocialHost } from "@/lib/extraction/network";
+import {
+  isNonOfficialDiscoveryHost,
+  isRestrictedSocialHost,
+} from "@/lib/extraction/network";
 import type { Lead, LeadKind, SearchInput, SourceType } from "@/lib/types";
 
 interface SourcedResult extends SearchResult {
   source: SourceType;
+}
+
+const JOB_RESULT_PATTERN = /\b(hiring|jobs?|job posting|vacanc(?:y|ies)|salary|apply now)\b/i;
+
+const SOCIAL_SOURCE_DOMAINS: Partial<Record<SourceType, string>> = {
+  linkedin: "linkedin.com",
+  instagram: "instagram.com",
+  facebook: "facebook.com",
+};
+
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  "united states": ["united states", "usa", "u.s.a", "u.s."],
+  "united kingdom": ["united kingdom", "uk", "u.k."],
+};
+
+function normalizedResultText(result: SearchResult): string {
+  let url = result.url;
+  try {
+    url = decodeURIComponent(url);
+  } catch {
+    // Keep the original URL when it contains malformed escapes.
+  }
+  return `${result.title} ${result.snippet} ${url}`.toLowerCase();
+}
+
+function includesPlace(haystack: string, place: string): boolean {
+  const normalized = place.trim().toLowerCase();
+  if (!normalized) return false;
+  const aliases = COUNTRY_ALIASES[normalized] ?? [normalized];
+  return aliases.some((alias) => {
+    const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(haystack);
+  });
+}
+
+export function resultMatchesTargetRegion(result: SearchResult, input: SearchInput): boolean {
+  const haystack = normalizedResultText(result);
+  let host = "";
+  try {
+    host = new URL(result.url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  const matchesNepal = host.endsWith(".np") || includesPlace(haystack, "Nepal") ||
+    input.cities.some((city) => includesPlace(haystack, city));
+  const matchesInternational = input.countries.some((country) => includesPlace(haystack, country));
+
+  if (input.regionMode === "nepal") return matchesNepal;
+  if (input.regionMode === "international") {
+    return input.countries.length ? matchesInternational : true;
+  }
+  return matchesNepal || (input.countries.length ? matchesInternational : true);
+}
+
+function verifiedLocation(result: SearchResult, input: SearchInput): { location: string; country: string } {
+  const haystack = normalizedResultText(result);
+  let host = "";
+  try {
+    host = new URL(result.url).hostname.toLowerCase();
+  } catch {
+    // The result was already URL-validated by the provider parser.
+  }
+
+  const matchedCities = input.cities.filter((city) => includesPlace(haystack, city));
+  const matchedCountries = input.countries.filter((country) => includesPlace(haystack, country));
+  const matchesNepal = host.endsWith(".np") || includesPlace(haystack, "Nepal") ||
+    (input.regionMode !== "international" && matchedCities.length > 0);
+
+  if (matchesNepal) {
+    const place = matchedCities.length ? `${matchedCities.join(", ")}, Nepal` : "Nepal";
+    return {
+      location: `${place} (source match)`,
+      country: "Nepal",
+    };
+  }
+
+  const place = [...matchedCities, ...matchedCountries].join(", ");
+  return {
+    location: place ? `${place} (source match)` : "International (location not specified)",
+    country: matchedCountries.join(", "),
+  };
+}
+
+export function isUsableDiscoveryResult(result: SourcedResult, input: SearchInput): boolean {
+  let host: string;
+  let pathname: string;
+  try {
+    const url = new URL(result.url);
+    host = url.hostname.toLowerCase().replace(/^www\./, "");
+    pathname = url.pathname;
+  } catch {
+    return false;
+  }
+
+  const expectedSocialDomain = SOCIAL_SOURCE_DOMAINS[result.source];
+  if (expectedSocialDomain) {
+    if (!(host === expectedSocialDomain || host.endsWith(`.${expectedSocialDomain}`))) return false;
+  } else if (isNonOfficialDiscoveryHost(host)) {
+    return false;
+  }
+
+  if (JOB_RESULT_PATTERN.test(`${result.title} ${pathname.replace(/[-_/]/g, " ")}`)) return false;
+  return resultMatchesTargetRegion(result, input);
 }
 
 function cleanResultTitle(title: string): string {
@@ -35,18 +142,6 @@ function socialUrls(source: SourceType, url: string) {
   };
 }
 
-function inferredLocation(input: SearchInput): { location: string; country: string } {
-  const cities = input.cities.join(", ");
-  const countries = input.countries.join(", ");
-  if (input.regionMode === "nepal") {
-    return { location: cities ? `${cities}, Nepal` : "Nepal", country: "Nepal" };
-  }
-  if (input.regionMode === "international") {
-    return { location: [cities, countries].filter(Boolean).join(", ") || "International", country: countries };
-  }
-  return { location: [cities, countries].filter(Boolean).join(", ") || "Nepal & international", country: countries };
-}
-
 function resultLead(result: SourcedResult, input: SearchInput): Lead {
   const title = cleanResultTitle(result.title) || new URL(result.url).hostname;
   // Social result content is not copied or mined for email addresses. It is
@@ -54,7 +149,7 @@ function resultLead(result: SourcedResult, input: SearchInput): Lead {
   const emails = result.source === "web" ? extractEmails(result.snippet) : [];
   const email = emails[0] ?? null;
   const social = socialUrls(result.source, result.url);
-  const place = inferredLocation(input);
+  const place = verifiedLocation(result, input);
 
   return {
     id: randomUUID(),
@@ -97,7 +192,6 @@ async function mapWithConcurrency<T, R>(
 }
 
 function mergeKey(lead: Lead): string {
-  if (lead.email) return `email:${lead.email.toLowerCase()}`;
   if (lead.websiteUrl) {
     try {
       return `host:${new URL(lead.websiteUrl).hostname.replace(/^www\./, "")}`;
@@ -105,6 +199,7 @@ function mergeKey(lead: Lead): string {
       // Fall through to the normalized company name.
     }
   }
+  if (lead.email) return `email:${lead.email.toLowerCase()}`;
   return `name:${lead.company.toLowerCase().replace(/\W+/g, "")}`;
 }
 
@@ -135,11 +230,11 @@ function mergeLeads(leads: Lead[]): Lead[] {
 export async function discoverLeads(input: SearchInput): Promise<Lead[]> {
   const batches = await Promise.all(
     input.sources.map(async (source) => {
-      const results = await braveWebSearch(buildDiscoveryQuery(input, source), source === "web" ? 12 : 8);
+      const results = await tavilyWebSearch(buildDiscoveryQuery(input, source), source === "web" ? 12 : 8);
       return results.map((result) => ({ ...result, source }));
     }),
   );
-  const sourced = batches.flat();
+  const sourced = batches.flat().filter((result) => isUsableDiscoveryResult(result, input));
   const baseLeads = sourced.map((result) => resultLead(result, input));
 
   if (!input.deepScan) return mergeLeads(baseLeads);
@@ -147,7 +242,10 @@ export async function discoverLeads(input: SearchInput): Promise<Lead[]> {
   const scanTargets = sourced
     .filter((result) => {
       try {
-        return result.source === "web" && !isRestrictedSocialHost(new URL(result.url).hostname);
+        const host = new URL(result.url).hostname;
+        return result.source === "web" &&
+          !isRestrictedSocialHost(host) &&
+          !isNonOfficialDiscoveryHost(host);
       } catch {
         return false;
       }
@@ -165,7 +263,7 @@ export async function discoverLeads(input: SearchInput): Promise<Lead[]> {
   const scanned = await mapWithConcurrency(scanTargets, 3, async (result) => {
     try {
       const contacts = await scanPublicWebsite(result.url);
-      const place = inferredLocation(input);
+      const place = verifiedLocation(result, input);
       return contacts.map<Lead>((contact) => ({
         id: randomUUID(),
         kind: contact.name ? "person" : "agency",

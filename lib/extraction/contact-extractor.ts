@@ -1,9 +1,12 @@
 import * as cheerio from "cheerio";
 import robotsParser from "robots-parser";
 
-import { extractEmailEvidence, extractEmails, isGenericMailbox } from "@/lib/extraction/email";
+import { extractEmailEvidence, extractVisibleEmails, isGenericMailbox } from "@/lib/extraction/email";
 import { fetchPublicText, SCANNER_USER_AGENT } from "@/lib/extraction/fetch";
-import { assertPublicHttpUrl, isRestrictedSocialHost } from "@/lib/extraction/network";
+import {
+  assertPublicHttpUrl,
+  isNonOfficialDiscoveryHost,
+} from "@/lib/extraction/network";
 import type { PublicContact } from "@/lib/types";
 
 const CONTACT_LINK_PATTERN = /contact|about|team|people|career|jobs|work-with|studio/i;
@@ -30,15 +33,22 @@ function organizationName(html: string, fallbackHost: string): string {
   for (const script of $("script[type='application/ld+json']").toArray()) {
     try {
       const value = JSON.parse($(script).text()) as Record<string, unknown>;
-      const candidates = Array.isArray(value) ? value : [value];
+      const rootCandidates = Array.isArray(value) ? value : [value];
+      const candidates = rootCandidates.flatMap((candidate) => {
+        if (!candidate || typeof candidate !== "object") return [];
+        const graph = (candidate as Record<string, unknown>)["@graph"];
+        return Array.isArray(graph) ? graph : [candidate];
+      });
       for (const candidate of candidates) {
-        if (
-          candidate &&
-          typeof candidate === "object" &&
-          typeof (candidate as Record<string, unknown>).name === "string"
-        ) {
-          return cleanTitle((candidate as Record<string, string>).name);
-        }
+        if (!candidate || typeof candidate !== "object") continue;
+        const record = candidate as Record<string, unknown>;
+        const rawTypes = Array.isArray(record["@type"]) ? record["@type"] : [record["@type"]];
+        const isOrganization = rawTypes.some(
+          (type) =>
+            typeof type === "string" &&
+            /^(Organization|Corporation|LocalBusiness|ProfessionalService|WebSite|Brand)$/i.test(type),
+        );
+        if (isOrganization && typeof record.name === "string") return cleanTitle(record.name);
       }
     } catch {
       // Invalid publisher JSON-LD is ignored.
@@ -108,8 +118,8 @@ function candidateLinks(homeUrl: URL, html: string): string[] {
 
 export async function scanPublicWebsite(input: string): Promise<PublicContact[]> {
   const initialUrl = await assertPublicHttpUrl(input);
-  if (isRestrictedSocialHost(initialUrl.hostname)) {
-    throw new Error("Social platforms are discovered through search results, not scanned directly.");
+  if (isNonOfficialDiscoveryHost(initialUrl.hostname)) {
+    throw new Error("Only an organization's official public website can be scanned for contacts.");
   }
 
   const robots = await robotsFor(initialUrl.origin);
@@ -135,25 +145,29 @@ export async function scanPublicWebsite(input: string): Promise<PublicContact[]>
   const contacts = new Map<string, PublicContact>();
 
   for (const page of pages) {
-    const emails = extractEmails(page.html);
+    const emails = extractVisibleEmails(page.html);
     for (const email of emails) {
       const identity = nearbyIdentity(page.html, email);
       const generic = isGenericMailbox(email);
+      const evidence = extractEmailEvidence(page.html, email);
+      if (!evidence) continue;
       const next: PublicContact = {
         name: identity.name,
         company,
         role: identity.role,
         email,
         sourceUrl: page.url,
-        evidence: extractEmailEvidence(page.html, email),
-        confidence: identity.name ? 94 : generic ? 86 : 90,
+        evidence,
+        confidence: identity.name ? 94 : generic ? 86 : 78,
       };
       const existing = contacts.get(email);
       if (!existing || next.confidence > existing.confidence) contacts.set(email, next);
     }
   }
 
-  return [...contacts.values()].sort((a, b) => b.confidence - a.confidence).slice(0, 8);
+  // One carefully selected public mailbox per organization prevents a single
+  // website from being contacted several times in the same campaign.
+  return [...contacts.values()].sort((a, b) => b.confidence - a.confidence).slice(0, 1);
 }
 
 export function looksLikeRelevantRole(value: string): boolean {
